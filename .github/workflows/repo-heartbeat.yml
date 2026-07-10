@@ -1,0 +1,29 @@
+name: Repo heartbeat
+
+# Independent of supabase-keepalive.yml: makes a trivial commit once a
+# month purely to keep this repo "active" from GitHub's point of view, so
+# scheduled workflows don't get auto-disabled after 60 days without repo
+# activity. Deliberately simple and unconditional, so it stays a reliable
+# backstop even if the ping workflow's logic ever breaks.
+
+on:
+  schedule:
+    - cron: "0 6 1 * *" # 06:00 UTC on the 1st of every month
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit heartbeat
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/repo-heartbeat
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/repo-heartbeat
+          git commit -m "chore: repo heartbeat $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
