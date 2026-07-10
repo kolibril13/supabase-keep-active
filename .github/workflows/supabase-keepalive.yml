@@ -1,16 +1,22 @@
 name: Supabase keepalive
 
-# Pings the "flat expenses" Supabase project (fumnlubgimbcwkozgpel) a few
-# times a week so it doesn't get auto-paused after 7 days of inactivity.
-# Also nudges this repo if it's gone quiet for a while, since GitHub
-# auto-disables scheduled workflows after 60 days with no repo activity.
+# Pings the "flat expenses" Supabase project (fumnlubgimbcwkozgpel) so it
+# doesn't get auto-paused after 7 days of inactivity.
+#
+# Trigger fires every hour (168 slots/week), but each run only actually
+# pings Supabase with ~3% probability (~5 real pings/week on average), so
+# the real request lands at a different, unpredictable hour each time
+# instead of a handful of fixed slots. A hard floor forces a real ping if
+# 5 days have passed since the last one, so bad RNG luck can never let it
+# slide past the 7-day pause window.
+#
+# Each real ping commits an updated .github/last-ping state file, which
+# doubles as repo activity — keeping GitHub from auto-disabling this
+# scheduled workflow after 60 days of repo inactivity.
 
 on:
   schedule:
-    - cron: "17 3 * * 1"  # Mon 03:17 UTC
-    - cron: "52 14 * * 3" # Wed 14:52 UTC
-    - cron: "38 9 * * 5"  # Fri 09:38 UTC
-    - cron: "5 21 * * 0"  # Sun 21:05 UTC
+    - cron: "0 * * * *" # every hour, on the hour (actual runs are usually a few minutes late)
   workflow_dispatch: {}
 
 permissions:
@@ -22,7 +28,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Decide whether this run should actually ping
+        id: decide
+        run: |
+          state_file=".github/last-ping"
+          now_ts=$(date +%s)
+          if [ -f "$state_file" ]; then
+            last_ts=$(date -d "$(cat "$state_file")" +%s)
+          else
+            last_ts=0
+          fi
+          days_since=$(( (now_ts - last_ts) / 86400 ))
+
+          # ~5 real pings per week out of 168 hourly slots: 5/168 ~= 0.0298
+          roll=$((RANDOM % 32768))
+          should_ping=false
+          if [ "$roll" -lt 975 ] || [ "$days_since" -ge 5 ]; then
+            should_ping=true
+          fi
+
+          echo "days_since_last_ping=$days_since roll=$roll/32768 should_ping=$should_ping"
+          echo "should_ping=$should_ping" >> "$GITHUB_OUTPUT"
+
       - name: Ping Supabase project
+        if: steps.decide.outputs.should_ping == 'true'
         run: |
           status=$(curl -sS -o /dev/null -w "%{http_code}" \
             "https://fumnlubgimbcwkozgpel.supabase.co/rest/v1/expenses?select=id&limit=1" \
@@ -35,19 +64,12 @@ jobs:
         env:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
-      - name: Heartbeat commit if repo has been quiet 50+ days
+      - name: Record ping (also serves as repo-activity heartbeat)
+        if: steps.decide.outputs.should_ping == 'true'
         run: |
-          last_commit_ts=$(git log -1 --format=%ct)
-          now_ts=$(date +%s)
-          days_since=$(( (now_ts - last_commit_ts) / 86400 ))
-          echo "Days since last repo commit: $days_since"
-          if [ "$days_since" -ge 50 ]; then
-            date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/keepalive-heartbeat
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .github/keepalive-heartbeat
-            git commit -m "chore: keepalive heartbeat (repo inactive ${days_since}d)"
-            git push
-          else
-            echo "Repo recently active, no heartbeat needed."
-          fi
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/last-ping
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/last-ping
+          git commit -m "chore: keepalive ping $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
