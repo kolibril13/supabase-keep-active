@@ -4,7 +4,7 @@ name: Supabase keepalive
 # doesn't get auto-paused after 7 days of inactivity.
 #
 # Trigger fires every hour (168 slots/week), but each run only actually
-# pings Supabase with ~3% probability (~5 real pings/week on average), so
+# pings Supabase with ~30% probability (~50 real pings/week on average), so
 # the real request lands at a different, unpredictable hour each time
 # instead of a handful of fixed slots. A hard floor forces a real ping if
 # 5 days have passed since the last one, so bad RNG luck can never let it
@@ -40,10 +40,10 @@ jobs:
           fi
           days_since=$(( (now_ts - last_ts) / 86400 ))
 
-          # ~5 real pings per week out of 168 hourly slots: 5/168 ~= 0.0298
+          # ~50 real pings per week out of 168 hourly slots: 50/168 ~= 0.2976
           roll=$((RANDOM % 32768))
           should_ping=false
-          if [ "$roll" -lt 975 ] || [ "$days_since" -ge 5 ]; then
+          if [ "$roll" -lt 9750 ] || [ "$days_since" -ge 5 ]; then
             should_ping=true
           fi
 
